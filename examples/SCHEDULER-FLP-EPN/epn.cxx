@@ -71,7 +71,7 @@ bool epn::receive() {
   FairMQPollerPtr poller(NewPoller("data"));
   poller->Poll(1000);
 
-  unsigned num_reveived = 0;
+  unsigned num_received = 0;
 
   for (uint64_t i = 0; i < numFLPS; i++) {
     if (!poller->CheckInput("data", i)) {
@@ -89,7 +89,7 @@ bool epn::receive() {
       continue;
     }
 
-    num_reveived++;
+    num_received++;
 
     std::memcpy(&messagei, aMessage->GetData(), sizeof(FLPtoEPN));
 
@@ -97,6 +97,7 @@ bool epn::receive() {
       LOG(ERROR) << "Bad Message ID from FLP" << i + 1 << " != " << messagei.IdOfFlp;
       continue;
     }
+
     if (messagei.sTF == 1 && messagei.schedNum == -1) {
       ofstream receptionOfTf, processingTime, numberOfLostTfs;
 
@@ -144,7 +145,7 @@ bool epn::receive() {
     }
   }
 
-  LOG(INFO) << "Received " << num_reveived << " STFs";
+  LOG(INFO) << "Received " << num_received << " STFs";
 
   return true;
 }

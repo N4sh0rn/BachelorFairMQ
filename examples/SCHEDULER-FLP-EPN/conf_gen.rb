@@ -84,10 +84,9 @@ DEVICE_HASH =
 }
 
 
-
 ###################
-SCHED_FLP_PORT = 20000
-SCHED_EPN_PORT = 30000
+SCHED_FLP_PORT = 40000
+SCHED_EPN_PORT = 50000
 sched_flp_port = SCHED_FLP_PORT
 sched_epn_port = SCHED_EPN_PORT
 #  sched channel
@@ -126,10 +125,62 @@ sched_dev[:channels] << sched_epn_chan
 
 
 
+### EPNS
+###################
+FLP_DATA_PORT = 50000
+flp_data_p = FLP_DATA_PORT
+epn_config = []
+epn_node_map = {}
+epn_port_per_node = {}
+# create all flp devices
+NUM_EPN.times do | epn |
+  epn_node = EPN_NODES[epn % NUM_EPN_NODES]
+  epn_node_map[epn] = { :node => epn_node, :data_ports => [] }
+
+
+  epn_port_per_node[epn_node] = FLP_DATA_PORT if epn_port_per_node[epn_node].nil?
+
+  # init used port for this node
+  # flp_port_per_node[flp_node] = FLP_DATA_PORT if flp_port_per_node[flp_node].nil?
+
+  epn_dev = Marshal.load(Marshal.dump(DEVICE_HASH))
+
+  epn_dev[:id] = "epn#{epn}"
+
+  # data channel for the current flp
+  epn_data_chan = Marshal.load(Marshal.dump(CHAN_HASH))
+  epn_data_chan[:name] = "data"
+  # flp sockets all do bind
+  NUM_FLP.times do | flp |
+    flp_socket = Marshal.load(Marshal.dump(SOCKET_HASH))
+    flp_socket[:type] = "pull"
+    flp_socket[:method] = "bind"
+    flp_socket[:address] = "tcp://*:#{epn_port_per_node[epn_node]}"
+    epn_node_map[epn][:data_ports] << epn_port_per_node[epn_node]
+    epn_port_per_node[epn_node] += 1
+
+    epn_data_chan[:sockets] << flp_socket
+  end
+  epn_dev[:channels] << epn_data_chan
+
+  #  sched channel
+  epn_sched_chan = Marshal.load(Marshal.dump(CHAN_HASH))
+  epn_sched_chan[:name] = "epnsched"
+  epn_sched_socket = Marshal.load(Marshal.dump(SOCKET_HASH))
+  epn_sched_socket[:type] = "push"
+  epn_sched_socket[:method] = "connect"
+  epn_sched_socket[:address] = "tcp://#{SCHED_NODE}ib0:#{SCHED_EPN_PORT + epn}"
+
+  epn_sched_chan[:sockets] << epn_sched_socket
+  epn_dev[:channels] << epn_sched_chan
+
+  epn_config << epn_dev
+end
+
+
 
 
 ###################
-FLP_DATA_PORT = 20000
 flp_port_per_node = {} # track used data ports on each flp node
 flp_node_map = {}
 
@@ -153,8 +204,8 @@ NUM_FLP.times do | flp |
   NUM_EPN.times do | epn |
     epn_socket = Marshal.load(Marshal.dump(SOCKET_HASH))
     epn_socket[:type] = "push"
-    epn_socket[:method] = "bind"
-    epn_socket[:address] = "tcp://*:#{flp_port_per_node[flp_node]}"
+    epn_socket[:method] = "connect"
+    epn_socket[:address] = "tcp://#{epn_node_map[epn][:node]}ib0:#{epn_node_map[epn][:data_ports][flp]}"
     flp_node_map[flp][:data_ports] << flp_port_per_node[flp_node]
     flp_port_per_node[flp_node] += 1
 
@@ -178,50 +229,7 @@ end
 
 
 
-###################
 
-epn_config = []
-epn_node_map = {}
-# create all flp devices
-NUM_EPN.times do | epn |
-  epn_node = EPN_NODES[epn % NUM_EPN_NODES]
-  epn_node_map[epn] = epn_node
-
-  # init used port for this node
-  # flp_port_per_node[flp_node] = FLP_DATA_PORT if flp_port_per_node[flp_node].nil?
-
-  epn_dev = Marshal.load(Marshal.dump(DEVICE_HASH))
-
-  epn_dev[:id] = "epn#{epn}"
-
-  # data channel for the current flp
-  epn_data_chan = Marshal.load(Marshal.dump(CHAN_HASH))
-  epn_data_chan[:name] = "data"
-  # flp sockets all do bind
-  NUM_FLP.times do | flp |
-    flp_socket = Marshal.load(Marshal.dump(SOCKET_HASH))
-    flp_socket[:type] = "pull"
-    flp_socket[:method] = "connect"
-    flp_socket[:address] = "tcp://#{flp_node_map[flp][:node]}ib0:#{flp_node_map[flp][:data_ports][epn]}"
-    # flp_config[flp][:channels][0][:sockets][epn][:address]
-
-    epn_data_chan[:sockets] << flp_socket
-  end
-  epn_dev[:channels] << epn_data_chan
-
-  #  sched channel
-  epn_sched_chan = Marshal.load(Marshal.dump(CHAN_HASH))
-  epn_sched_chan[:name] = "epnsched"
-  epn_sched_socket = Marshal.load(Marshal.dump(SOCKET_HASH))
-  epn_sched_socket[:type] = "push"
-  epn_sched_socket[:method] = "connect"
-  epn_sched_socket[:address] = "tcp://#{SCHED_NODE}ib0:#{SCHED_EPN_PORT + epn}"
-
-  epn_sched_chan[:sockets] << epn_sched_socket
-  epn_dev[:channels] << epn_sched_chan
-
-  epn_config << epn_dev
-end
 
 
 
@@ -274,7 +282,7 @@ end
 spm_file_lines << ""
 
 NUM_EPN.times do | epn |
-  epn_spm = [ epn_node_map[epn] , ":", "/bin/bash -c \"",
+  epn_spm = [ epn_node_map[epn][:node] , ":", "/bin/bash -c \"",
     [ "#{ENV['TEST_ROOT_DIR']}/fairmq-ex-SCHEDULER-FLP-EPN-epn",
       "--id", "epn#{epn}",
       "--myId", "#{epn + 1}",

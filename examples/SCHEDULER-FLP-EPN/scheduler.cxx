@@ -83,13 +83,16 @@ bool scheduler::ConditionalRun() {
     ofAvailableEpns << availableEpns1.rdbuf();
 
     LOG(INFO) << "TERMINATING PROGRAM NOW!";
+
+    // make sure all messages are sent
+    std::this_thread::sleep_for(std::chrono::seconds(long(10)));
     exit(0);
     return false;
   }
 
   else {
     FairMQPollerPtr poller(NewPoller("epnsched"));
-    poller->Poll(100);
+    poller->Poll(50);
 
     for (int i = 0; i < numEPNS; i++) {
       if (poller->CheckInput("epnsched", i)) {
@@ -97,49 +100,48 @@ bool scheduler::ConditionalRun() {
         // try to receive more updates
         // I expect this kind of messages
         EPNtoScheduler msgFromSender;
-        if (true) {
-          // receive a message
-          FairMQMessagePtr aMessage = myRecvChan.NewMessage();
-          if (myRecvChan.Receive(aMessage) == sizeof(EPNtoScheduler)) {
-            if (aMessage->GetSize() == sizeof(EPNtoScheduler)) {
-              // get the data of the FairMQ message
-              std::memcpy(&msgFromSender, aMessage->GetData(), sizeof(EPNtoScheduler));
-              // LOG(INFO)<<"received ID: "<<msgFromSender.Id<<" and amount of free slots "<<msgFromSender.freeSlots<<"
-              // and amount of EPNs is: "<< msgFromSender.numEPNs << endl;
-              update(msgFromSender.Id, msgFromSender.freeSlots);
-            }
-          } else {
-            break;
-          }
+
+        // receive a message
+        FairMQMessagePtr aMessage = myRecvChan.NewMessage();
+        if (myRecvChan.Receive(aMessage) == sizeof(EPNtoScheduler)) {
+          // get the data of the FairMQ message
+          std::memcpy(&msgFromSender, aMessage->GetData(), sizeof(EPNtoScheduler));
+          // LOG(INFO)<<"received ID: "<<msgFromSender.Id<<" and amount of free slots "<<msgFromSender.freeSlots<<"
+          // and amount of EPNs is: "<< msgFromSender.numEPNs << endl;
+          update(msgFromSender.Id, msgFromSender.freeSlots);
+        } else {
+          LOG(ERROR) << "Error while receiving EPN updates.";
+          return false;
         }
       }
     }
-
-    if (getHistKey() >= (keyForGeneratingArray + uint64_t(intervalFLPs * 1000.0))) {
-      LOG(INFO) << "next time " << (keyForGeneratingArray + uint64_t(intervalFLPs * 1000.0));
-
-      LOG(INFO) << "Creating the schedule " << scheduleNumber << " at time " << getHistKey() << " lastKey "
-                << keyForGeneratingArray;
-      LOG(INFO) << "intervalFLPs " << intervalFLPs;
-      vectorForFlps = simpleRRSched(m);
-      m = (m + amountEPNs) % numEPNS;
-      int f = availableEpns(generateArray1(), numEPNS);
-      LOG(INFO) << "Epns having at least one free memory slot: " << f;
-      availableEpns1 << f << endl;
-      // int inSchedule= EpnsInSchedule(f, amountEPNs);
-      // LOG(INFO)<<"Epns in Schedule: "<< inSchedule;
-      // EpnsInSchedule1<<inSchedule<<endl;
-      EpnsInSchedule1 << epnsInScheduleRR << endl;
-      epnsInScheduleRR = 0;
-      // vectorForFlps = generateSchedule();
-      // printVecFLP(vectorForFlps);
-      keyForGeneratingArray = getHistKey();
-      scheduleNumber++;
-      std::thread t1 = senderThread(&vectorForFlps, &numFLPS, &amountEPNs, &scheduleNumber);
-      t1.detach();
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
   }
+
+  if (getHistKey() >= (keyForGeneratingArray + uint64_t(intervalFLPs * 1000.0))) {
+    LOG(INFO) << "next time " << (keyForGeneratingArray + uint64_t(intervalFLPs * 1000.0));
+
+    LOG(INFO) << "Creating the schedule " << scheduleNumber << " at time " << getHistKey() << " lastKey "
+              << keyForGeneratingArray;
+    LOG(INFO) << "intervalFLPs " << intervalFLPs;
+    vectorForFlps = simpleRRSched(m);
+    m = (m + amountEPNs) % numEPNS;
+    int f = availableEpns(generateArray1(), numEPNS);
+    LOG(INFO) << "Epns having at least one free memory slot: " << f;
+    availableEpns1 << f << endl;
+    // int inSchedule= EpnsInSchedule(f, amountEPNs);
+    // LOG(INFO)<<"Epns in Schedule: "<< inSchedule;
+    // EpnsInSchedule1<<inSchedule<<endl;
+    EpnsInSchedule1 << epnsInScheduleRR << endl;
+    epnsInScheduleRR = 0;
+    // vectorForFlps = generateSchedule();
+    // printVecFLP(vectorForFlps);
+    keyForGeneratingArray = getHistKey();
+    scheduleNumber++;
+    std::thread t1 = senderThread(&vectorForFlps, &numFLPS, &amountEPNs, &scheduleNumber);
+    t1.detach();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
   return true;
 }
 

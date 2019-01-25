@@ -60,13 +60,17 @@ void flp::Run() {
 
     // receive a message
     FairMQMessagePtr aMessage = myRecvChan.NewMessage();
-    myRecvChan.Receive(aMessage);
-    // get the pointer of the message.
+    if (myRecvChan.Receive(aMessage) != ((sizeof(uint64_t)) * amountEPNs)) {
+      LOG(ERROR) << "Error while receiving EPN updates.";
+      return;
+    }
 
+    // get the pointer of the message.
     std::memcpy(msgIReceive.data(), aMessage->GetData(), ((sizeof(uint64_t)) * amountEPNs));
     if (aMessage->GetSize() == ((sizeof(uint64_t)) * amountEPNs)) {
       schedNum++;
       int i = 0;
+
       for (vector<uint64_t>::const_iterator iter = msgIReceive.begin(); iter != msgIReceive.end(); ++iter) {
         arrayofEpns[i] = *iter;
         i++;
@@ -89,9 +93,13 @@ void flp::Run() {
         amountOfLostTfs.open("amountOfLostTfs.txt." + to_string(myId), std::ios_base::app);
         amountOfLostTfs << amountOfLostTfs1.rdbuf();
         LOG(INFO) << "TERMINATING PROGRAM NOW!";
+
+        // make sure all messages are sent
+        std::this_thread::sleep_for(std::chrono::seconds(long(5)));
         exit(0);
         return;
       }
+
       LOG(INFO) << "time now: " << getHistKey();
       const auto startSendTime = getCurrentMs();
       for (int i = 0; i < amountEPNs; i++) {
@@ -115,7 +123,7 @@ void flp::Run() {
           if ((getCurrentMs() - startSendTime) / msBetweenSubtimeframes > i) {
             continue;  // send more
           } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(msBetweenSubtimeframes - 1));  // wait 25 - 1 ms.
+            std::this_thread::sleep_for(std::chrono::milliseconds(msBetweenSubtimeframes - 5));  // wait 25 - 1 ms.
           }
         }
 
@@ -125,7 +133,7 @@ void flp::Run() {
         }
       }
     }
-  }
+  }  // while (RUNNING)
 }
 
 uint64_t flp::getHistKey() {
