@@ -90,12 +90,16 @@ void flp::Run() {
         }
 
         ofstream amountOfLostTfs;
-        amountOfLostTfs.open("amountOfLostTfs.txt." + to_string(myId), std::ios_base::app);
+        amountOfLostTfs.open("amountOfLostTfs.txt." + to_string(myId), std::ios_base::trunc);
         amountOfLostTfs << amountOfLostTfs1.rdbuf();
-        LOG(INFO) << "TERMINATING PROGRAM NOW!";
+
+        amountOfLostTfs.flush();
+        amountOfLostTfs.close();
 
         // make sure all messages are sent
         std::this_thread::sleep_for(std::chrono::seconds(long(5)));
+
+        LOG(INFO) << "TERMINATING PROGRAM NOW!";
         exit(0);
         return;
       }

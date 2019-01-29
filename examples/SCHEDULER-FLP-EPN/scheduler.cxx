@@ -13,6 +13,7 @@
 #include <string>
 #include <thread>  // this_thread::sleep_for
 #include <vector>
+#include <mutex>
 #include "Message.h"
 
 using namespace std;
@@ -59,6 +60,8 @@ void scheduler::InitTask() {
 }
 
 bool scheduler::ConditionalRun() {
+
+  // exit condition
   if ((getHistKey() - keyForExiting) > (programTime * 60 * 1000)) {
     // SEND MESSAGE TO FLPS SAYING IT's ALL 3
     vector<uint64_t> vect;
@@ -75,44 +78,52 @@ bool scheduler::ConditionalRun() {
 
     LOG(INFO) << "about to terminate the program!";
     ofstream ofHeatdata, ofEpnsInSchedule, ofAvailableEpns;
-    ofHeatdata.open("heatdata.txt", std::ios_base::app);
-    ofEpnsInSchedule.open("EpnsInSchedule.txt", std::ios_base::app);
-    ofAvailableEpns.open("availableEpns.txt", std::ios_base::app);
+    ofHeatdata.open("heatdata.txt", std::ios_base::trunc);
+    ofEpnsInSchedule.open("EpnsInSchedule.txt", std::ios_base::trunc);
+    ofAvailableEpns.open("availableEpns.txt", std::ios_base::trunc);
+
     ofHeatdata << heatdata1.rdbuf();
     ofEpnsInSchedule << EpnsInSchedule1.rdbuf();
     ofAvailableEpns << availableEpns1.rdbuf();
 
-    LOG(INFO) << "TERMINATING PROGRAM NOW!";
+    // flush and close because we exit before ofstream destructor is called
+    ofHeatdata.flush();
+    ofEpnsInSchedule.flush();
+    ofAvailableEpns.flush();
+
+    ofHeatdata.close();
+    ofEpnsInSchedule.close();
+    ofAvailableEpns.close();
 
     // make sure all messages are sent
     std::this_thread::sleep_for(std::chrono::seconds(long(10)));
+    LOG(INFO) << "TERMINATING PROGRAM NOW!";
     exit(0);
     return false;
   }
 
-  else {
-    FairMQPollerPtr poller(NewPoller("epnsched"));
-    poller->Poll(50);
+  // receiving epn updates
+  FairMQPollerPtr poller(NewPoller("epnsched"));
+  poller->Poll(50);
 
-    for (int i = 0; i < numEPNS; i++) {
-      if (poller->CheckInput("epnsched", i)) {
-        auto& myRecvChan = GetChannel("epnsched", i);
-        // try to receive more updates
-        // I expect this kind of messages
-        EPNtoScheduler msgFromSender;
+  for (int i = 0; i < numEPNS; i++) {
+    if (poller->CheckInput("epnsched", i)) {
+      auto& myRecvChan = GetChannel("epnsched", i);
+      // try to receive more updates
+      // I expect this kind of messages
+      EPNtoScheduler msgFromSender;
 
-        // receive a message
-        FairMQMessagePtr aMessage = myRecvChan.NewMessage();
-        if (myRecvChan.Receive(aMessage) == sizeof(EPNtoScheduler)) {
-          // get the data of the FairMQ message
-          std::memcpy(&msgFromSender, aMessage->GetData(), sizeof(EPNtoScheduler));
-          // LOG(INFO)<<"received ID: "<<msgFromSender.Id<<" and amount of free slots "<<msgFromSender.freeSlots<<"
-          // and amount of EPNs is: "<< msgFromSender.numEPNs << endl;
-          update(msgFromSender.Id, msgFromSender.freeSlots);
-        } else {
-          LOG(ERROR) << "Error while receiving EPN updates.";
-          return false;
-        }
+      // receive a message
+      FairMQMessagePtr aMessage = myRecvChan.NewMessage();
+      if (myRecvChan.Receive(aMessage) == sizeof(EPNtoScheduler)) {
+        // get the data of the FairMQ message
+        std::memcpy(&msgFromSender, aMessage->GetData(), sizeof(EPNtoScheduler));
+        // LOG(INFO)<<"received ID: "<<msgFromSender.Id<<" and amount of free slots "<<msgFromSender.freeSlots<<"
+        // and amount of EPNs is: "<< msgFromSender.numEPNs << endl;
+        update(msgFromSender.Id, msgFromSender.freeSlots);
+      } else {
+        LOG(ERROR) << "Error while receiving EPN updates.";
+        return false;
       }
     }
   }
@@ -342,6 +353,8 @@ void scheduler::printfreeSlots(int arr[], int length) {
   cout << '\n';
 }
 
+static std::mutex sched_send_mutex;
+
 void scheduler::sender(std::vector<uint64_t>* vec, uint64_t* num, uint64_t* numE, uint64_t* schedNum) {
   const vector<uint64_t> lVec = *vec;
   assert(lVec.size() == amountEPNs);
@@ -351,13 +364,17 @@ void scheduler::sender(std::vector<uint64_t>* vec, uint64_t* num, uint64_t* numE
     LOG(INFO) << "Schedule number " << *schedNum << " sent Id of epn which is: " << *iter;
   }
 
-  for (uint64_t i = 0; i < numFLPS; i++) {
-    auto& mySendingChan = GetChannel("schedflp", i);
+  {
+    std::lock_guard<std::mutex> guard(sched_send_mutex);
 
-    FairMQMessagePtr message = mySendingChan.NewMessage((sizeof(uint64_t)) * lVec.size());
+    for (uint64_t i = 0; i < numFLPS; i++) {
+      auto& mySendingChan = GetChannel("schedflp", i);
 
-    std::memcpy(message->GetData(), lVec.data(), message->GetSize());
-    mySendingChan.Send(message);
+      FairMQMessagePtr message = mySendingChan.NewMessage((sizeof(uint64_t)) * lVec.size());
+
+      std::memcpy(message->GetData(), lVec.data(), message->GetSize());
+      mySendingChan.Send(message);
+    }
   }
 }
 

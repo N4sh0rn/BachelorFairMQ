@@ -9,6 +9,7 @@
 #define FAIRMQEXAMPLESCHEDULERFLPEPNEPN_H
 
 #include <time.h>
+#include <atomic>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -23,11 +24,11 @@ class epn : public FairMQDevice {
  public:
   epn();
   virtual ~epn();
-  void send(int* memory, uint64_t* numepns, uint64_t* id);
+
 
  protected:
   uint64_t Id;
-  int freeSlots;
+  std::atomic_int freeSlots;
   uint64_t maxSlots;
   uint64_t numEPNS;
   uint64_t numFLPS;
@@ -52,10 +53,9 @@ class epn : public FairMQDevice {
 
   std::string getChannel(char number);
   bool receive();
+  void send();
 
-  std::thread senderThread(int* memory, uint64_t* numepns, uint64_t* id);
-
-  static void MyDelayedFun(float delayWork, int* memory, std::stringstream* procTime);
+  void MyDelayedFun(float delayWork);
   float getDelay();
 
   uint64_t getHistKey();

@@ -86,7 +86,7 @@ DEVICE_HASH =
 
 ###################
 SCHED_FLP_PORT = 40000
-SCHED_EPN_PORT = 50000
+SCHED_EPN_PORT = 20000
 sched_flp_port = SCHED_FLP_PORT
 sched_epn_port = SCHED_EPN_PORT
 #  sched channel
@@ -127,7 +127,7 @@ sched_dev[:channels] << sched_epn_chan
 
 ### EPNS
 ###################
-FLP_DATA_PORT = 50000
+FLP_DATA_PORT = 20000
 flp_data_p = FLP_DATA_PORT
 epn_config = []
 epn_node_map = {}

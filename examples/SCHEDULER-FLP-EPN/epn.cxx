@@ -50,7 +50,7 @@ void epn::InitTask() {
   freeSlots = maxSlots;
   numEPNS = fConfig->GetValue<uint64_t>("numEPNS");
   numFLPS = fConfig->GetValue<uint64_t>("numFLPS");
-  std::thread th1 = senderThread(&freeSlots, &numEPNS, &Id);
+  std::thread th1 = std::thread(&epn::send, this);
   th1.detach();
 }
 
@@ -69,7 +69,7 @@ uint64_t epn::getHistKey() {
 
 bool epn::receive() {
   FairMQPollerPtr poller(NewPoller("data"));
-  poller->Poll(1000);
+  poller->Poll(100000);
 
   unsigned num_received = 0;
 
@@ -101,15 +101,22 @@ bool epn::receive() {
     if (messagei.sTF == 1 && messagei.schedNum == -1) {
       ofstream receptionOfTf, processingTime, numberOfLostTfs;
 
-      receptionOfTf.open("TimebetweenReceptionOfTf.txt." + to_string(Id), std::ios_base::app);
-      processingTime.open("processingTime.txt." + to_string(Id), std::ios_base::app);
+      receptionOfTf.open("TimebetweenReceptionOfTf.txt." + to_string(Id), std::ios_base::trunc);
+      processingTime.open("processingTime.txt." + to_string(Id), std::ios_base::trunc);
       // numberOfLostTfs.open("numberOfLostTfs.txt."+to_string(Id),
-      // std::ios_base::app);
 
       receptionOfTf << receptionOfTf1.rdbuf();
       processingTime << processingTime1.rdbuf();
+
+      receptionOfTf.flush();
+      processingTime.flush();
+
+      receptionOfTf.close();
+      processingTime.close();
+
       // numberOfLostTfs<<numberOfLostTfs1.rdbuf();
 
+      std::this_thread::sleep_for(std::chrono::seconds(5));
       LOG(INFO) << "TERMINATING PROGRAM NOW!";
       exit(0);
       return false;  // stop the FairMQ device
@@ -133,9 +140,9 @@ bool epn::receive() {
       if (freeSlots > 0) {
         freeSlots--;
         float x = getDelay();
-        LOG(INFO) << "Delay work for: " << x << "seconds for TFid: " << messagei.sTF << "and my ID is: " << Id
+        LOG(INFO) << "Delay work for: " << x << " seconds for TFid: " << messagei.sTF << " and my ID is: " << Id
                   << "and this is schedule nr: " << messagei.schedNum;
-        std::thread t3(MyDelayedFun, x, &freeSlots, &processingTime1);
+        std::thread t3(&epn::MyDelayedFun, this, x);
         t3.detach();
       } else {
         LOG(INFO) << "INFORMATION LOST DUE TO OVERCAPACITY AND MY ID IS: " << Id
@@ -150,14 +157,24 @@ bool epn::receive() {
   return true;
 }
 
-void epn::send(int *memory, uint64_t *numepns, uint64_t *id) {
+void epn::send() {
   // change the sending
   auto &mySendingChan = GetChannel("epnsched");
-  while (CheckCurrentState("RUNNING")) {
+
+  unsigned sent_updates = 0;
+
+  while (true) {
+
+    if (!CheckCurrentState("RUNNING")) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      continue;
+    }
+
     EPNtoScheduler myMsg;
-    myMsg.Id = *id;
-    myMsg.freeSlots = *memory;
-    myMsg.numEPNs = *numepns;
+    myMsg.Id = Id;
+    myMsg.freeSlots = freeSlots.load();
+    myMsg.numEPNs = numEPNS;
+
     FairMQMessagePtr message = mySendingChan.NewMessage(sizeof(EPNtoScheduler));
     std::memcpy(message->GetData(), &myMsg, sizeof(EPNtoScheduler));
     mySendingChan.Send(message);
@@ -165,21 +182,25 @@ void epn::send(int *memory, uint64_t *numepns, uint64_t *id) {
     // LOG(INFO)<<"sent ID: "<<myMsg.Id<<" and amount of free slots
     // "<<myMsg.freeSlots<< " general amount of EPNs: "  <<myMsg.numEPNs <<
     // endl;
-    std::this_thread::sleep_for(std::chrono::milliseconds(long(100)));
+
+    if (++sent_updates % 50 == 0) {
+      LOG(INFO) << "Free slot in update (" << sent_updates << ") sent: " << myMsg.freeSlots;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(long(250)));
   }
+
+  LOG(INFO) << "Exiting sender update thread.";
 }
 
-thread epn::senderThread(int *memory, uint64_t *numepns, uint64_t *id) {
-  return std::thread([=] { this->send(memory, numepns, id); });
-}
-
-void epn::MyDelayedFun(float delayWork, int *memory, std::stringstream *procTime) {
+void epn::MyDelayedFun(float delayWork) {
   //(*memory)--;
   // LOG(INFO)<<"amount of memory slots after decrementing: "<<*memory<<endl;
-  (*procTime) << delayWork << endl;
+  processingTime1 << delayWork << endl;
   std::this_thread::sleep_for(std::chrono::milliseconds(long(delayWork * 1000)));
-  // cout<<"Delayed thread executioning the work now! \n";
-  (*memory)++;
+  freeSlots++;
+
+  LOG(INFO) << "TF processed, new free slot count: " << freeSlots;
 }
 
 float epn::getDelay() {
