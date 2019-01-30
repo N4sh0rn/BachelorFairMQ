@@ -53,7 +53,6 @@ void scheduler::InitTask() {
   amountEPNs = fConfig->GetValue<uint64_t>("amountEPNs");
   programTime = fConfig->GetValue<uint64_t>("programTime");
   initialize(numEPNS);
-  std::this_thread::sleep_for(std::chrono::milliseconds(20000));
   keyForToFile = getHistKey();
   keyForGeneratingArray = getHistKey();
   keyForExiting = getHistKey();
@@ -120,12 +119,17 @@ bool scheduler::ConditionalRun() {
         std::memcpy(&msgFromSender, aMessage->GetData(), sizeof(EPNtoScheduler));
         // LOG(INFO)<<"received ID: "<<msgFromSender.Id<<" and amount of free slots "<<msgFromSender.freeSlots<<"
         // and amount of EPNs is: "<< msgFromSender.numEPNs << endl;
-        update(msgFromSender.Id, msgFromSender.freeSlots);
+        update(msgFromSender);
       } else {
         LOG(ERROR) << "Error while receiving EPN updates.";
         return false;
       }
     }
+  }
+
+  // wait for all EPNs
+  if (onlineEPNs < numEPNS) {
+    return true;
   }
 
   if (getHistKey() >= (keyForGeneratingArray + uint64_t(intervalFLPs * 1000.0))) {
@@ -202,14 +206,38 @@ void scheduler::printHist() {
   cout << endl;
 }
 
-void scheduler::update(uint64_t epnId, uint64_t myMem) {
+void scheduler::update(const EPNtoScheduler &update) {
   // get the key (also current time)
   const auto key = getHistKey();
+  const auto epnId = update.Id;
+
+  // check if the epn sent an update
+  if (epnOnline.count(epnId) == 0) {
+    epnOnline[epnId] = true;
+    onlineEPNs++;
+
+    if (onlineEPNs == numEPNS) {
+      LOG(INFO) << "Starting the history at " << key;
+      keyForGeneratingArray = key;
+      keyForToFile = key;
+      keyForExiting = key;
+
+      while (history.size() > 1) {
+        history.erase(history.begin());
+      }
+    }
+  }
 
   // checking if the key already exists
   if (history.count(key) != 0) {
+
+    // record timestamp so EPN is not considered lost
     history[key].at(epnId - 1).ts = key;
-    history[key].at(epnId - 1).memVal = myMem;
+
+    if (history[key].at(epnId - 1).seqId < update.seqId) {
+      history[key].at(epnId - 1).seqId = update.seqId;
+      history[key].at(epnId - 1).memVal = update.freeSlots;
+    }
   }
   // case that key does not exist.
   else {  // get the previous key
@@ -225,15 +253,23 @@ void scheduler::update(uint64_t epnId, uint64_t myMem) {
       if (history[prevKeyInt].at(a).ts < tooOld) {
         history[key].at(a).ts = 0;
         history[key].at(a).memVal = 0;
+        history[key].at(a).seqId = 0;
       } else {
-        history[key].at(a).ts = history[prevKeyInt].at(a).ts;
-        history[key].at(a).memVal = history[prevKeyInt].at(a).memVal;
+
+        history[key].at(a) = history[prevKeyInt].at(a);
+
+        // history[key].at(a).ts = history[prevKeyInt].at(a).ts;
+        // history[key].at(a).seqId = history[prevKeyInt].at(a).seqId;
+        // history[key].at(a).memVal = history[prevKeyInt].at(a).memVal;
       }
     }
 
     // overwrite with the current values.
     history[key].at(epnId - 1).ts = key;
-    history[key].at(epnId - 1).memVal = myMem;
+    if (history[key].at(epnId - 1).seqId < update.seqId) {
+      history[key].at(epnId - 1).seqId = update.seqId;
+      history[key].at(epnId - 1).memVal = update.freeSlots;
+    }
 
     // }
   }
@@ -248,10 +284,13 @@ void scheduler::update(uint64_t epnId, uint64_t myMem) {
     // update tooOld integer
     tooOld = newFirstKey->first;
   }
+
   // write history to file every minute.
   if (key >= (keyForToFile + historyMaxMs)) {
-    toFile();
-    keyForToFile = key;
+    if (onlineEPNs == numEPNS) {
+      toFile();
+      keyForToFile = key;
+    }
   }
 }
 

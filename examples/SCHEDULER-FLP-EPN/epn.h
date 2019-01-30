@@ -29,6 +29,7 @@ class epn : public FairMQDevice {
  protected:
   uint64_t Id;
   std::atomic_int freeSlots;
+  uint64_t seqId = 0;
   uint64_t maxSlots;
   uint64_t numEPNS;
   uint64_t numFLPS;

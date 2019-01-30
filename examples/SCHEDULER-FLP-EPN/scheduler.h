@@ -29,9 +29,14 @@ class scheduler : public FairMQDevice {
   // for EPN SCHEDULER DEALING
   struct EpnInfo {
     uint64_t ts = 0;
+    uint64_t seqId = 0;
     uint64_t memVal = 0;
   };
   std::map<uint64_t, std::vector<EpnInfo> > history;
+  std::map<uint64_t, bool> epnOnline;
+  unsigned onlineEPNs = 0;
+
+
   uint64_t numEPNS;
   uint64_t numFLPS;
   const unsigned intMs;
@@ -64,7 +69,7 @@ class scheduler : public FairMQDevice {
   uint64_t getHistKey();
   void initialize(uint64_t numEPNs);
   void printHist();
-  void update(uint64_t epnId, uint64_t myMem);
+  void update(const EPNtoScheduler &);
   void toFile();
   // what I want to return in this function is a pointer to the first element of the array
   std::vector<uint64_t> generateSchedule();

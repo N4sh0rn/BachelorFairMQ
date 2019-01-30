@@ -172,6 +172,7 @@ void epn::send() {
 
     EPNtoScheduler myMsg;
     myMsg.Id = Id;
+    myMsg.seqId = seqId;
     myMsg.freeSlots = freeSlots.load();
     myMsg.numEPNs = numEPNS;
 
@@ -199,6 +200,7 @@ void epn::MyDelayedFun(float delayWork) {
   processingTime1 << delayWork << endl;
   std::this_thread::sleep_for(std::chrono::milliseconds(long(delayWork * 1000)));
   freeSlots++;
+  seqId++;
 
   LOG(INFO) << "TF processed, new free slot count: " << freeSlots;
 }
